@@ -1,29 +1,19 @@
-//! Your venue's swap-route test — the same end-to-end suite the example passes,
-//! run against `YourVenue`. Red once you've implemented YourVenue and pointed the
-//! config below at a real pool + program (with SOLANA_RPC_URL set and the route
-//! program built); SKIPs cleanly until then.
-
+//! Optional live RLP route simulation. Local fixtures live in junior_route.rs.
 mod common;
-
-use common::{RouteConfig, run_swap_route};
-use solana_pubkey::Pubkey;
-use titan_integration_template::your_venue::YourVenue;
-
-fn pool() -> Pubkey {
-    // FILL_IN: a real pool/market account for your venue to route through.
-    todo!("set your_venue_route.rs pool to a real pool or market account")
-}
-
-fn venue_programs() -> Vec<Pubkey> {
-    // FILL_IN: your venue's program(s) the swap CPI invokes.
-    todo!("set your_venue_route.rs venue_programs to your route CPI dependencies")
-}
-
+use titan_integration_template::reflect_junior::{ReflectJuniorVenue, RLP_PROGRAM_ID};
 #[tokio::test]
-async fn swap_route_both_directions() {
-    run_swap_route::<YourVenue>(RouteConfig {
-        pool: pool(),
-        venue_programs: venue_programs(),
+async fn reserve_to_lp_mint_routes() {
+    let Ok(pool) = std::env::var("RLP_POOL") else {
+        eprintln!("SKIP live RLP route: set RLP_POOL, RLP_ASSET_MINTS and SOLANA_RPC_URL");
+        return;
+    };
+    if std::env::var("RLP_ASSET_MINTS").is_err() {
+        eprintln!("SKIP live RLP route: set RLP_ASSET_MINTS");
+        return;
+    }
+    common::run_swap_route::<ReflectJuniorVenue>(common::RouteConfig {
+        pool: pool.parse().expect("invalid RLP_POOL"),
+        venue_programs: vec![RLP_PROGRAM_ID],
     })
     .await;
 }

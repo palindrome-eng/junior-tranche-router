@@ -78,6 +78,7 @@ fn fill_in_files() -> Vec<(String, usize)> {
 /// Whether the venue program binaries the simulation tests need are dumped.
 fn programs_present() -> bool {
     [
+        "JrXLmS6aYJNJDVxdAfjNJE5wikT8ubf3TA9iL2JA9Av.so",
         "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8.so",
         "sspUE1vrh7xRoXxGsg7vR1zde2WdGtJRbyK9uRumBDy.so",
         "ssmbu3KZxgonUtjEMCKspZzxvUQCxAFnyh1rcHUeEDo.so",
@@ -154,7 +155,7 @@ fn render_simulation() -> String {
 
     format!(
         "\n{}  Status    Detail\n  --------  ------------------------------------------------------------\n  {status:<8}  {detail}\n",
-        render_subheader("Simulation")
+        render_subheader("Live simulation")
     )
 }
 
@@ -196,7 +197,10 @@ fn integration_scorecard() {
     let swap_route = read("src/swap_route/mod.rs");
     let state = read(&format!("{PROGRAM_SRC}/state.rs"));
     let template_venue = read(&format!("{PROGRAM_SRC}/instructions/venues/template.rs"));
-    let your_venue = read("src/your_venue/mod.rs");
+    let your_venue = read("src/reflect_junior/mod.rs");
+    let junior_cpi = read(&format!(
+        "{PROGRAM_SRC}/instructions/venues/reflect_junior.rs"
+    ));
     let venue_creation = read("tests/venue_creation.rs");
     let your_venue_creation = read("tests/your_venue_creation.rs");
 
@@ -213,8 +217,9 @@ fn integration_scorecard() {
         !your_venue.contains("YourVenue::parse_pool_creations")
             && !your_venue_creation.contains("FILL_IN:")
             && !your_venue_creation.contains("todo!("),
-        !your_venue.contains("todo!("),
+        !your_venue.contains("todo!(") && your_venue.contains("fn quote"),
         !state.contains("TemplateVenue")
+            && !junior_cpi.is_empty()
             && !template_venue.contains("11111111111111111111111111111111"),
         !swap_route.contains("TemplateVenue"),
     ];
@@ -238,16 +243,25 @@ fn integration_scorecard() {
     }
 
     if show_venue {
-        report.push_str(&render_layers("Your venue (fill these in):", venue_done));
+        report.push_str(&render_layers("Reflect junior tranche:", venue_done));
 
         let fill_in = fill_in_files();
         report.push_str(&render_fill_in(&fill_in));
         report.push_str(&render_simulation());
-        report.push_str(&render_summary("Your venue", venue_done));
+        report.push_str(&render_summary("RLP", venue_done));
     }
 
     report.push_str("=============================================================\n");
     println!("{report}");
+
+    assert!(
+        venue_done.iter().all(|d| *d),
+        "RLP integration layers must be wired"
+    );
+    assert!(
+        fill_in_files().is_empty(),
+        "integration still contains placeholders"
+    );
 
     // The reference example is a regression guard: it must always be complete.
     assert!(

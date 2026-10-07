@@ -41,8 +41,31 @@ use titan_integration_template::trading_venue::{
 
 /// Bound shared by every suite function: a venue that can be built from an
 /// account and quoted, usable across `.await` points.
-pub trait SuiteVenue: TradingVenue + FromAccount + Send + Sync {}
-impl<T: TradingVenue + FromAccount + Send + Sync> SuiteVenue for T {}
+pub trait SuiteVenue: TradingVenue + FromAccount + Send + Sync {
+    fn from_test_account(
+        key: &Pubkey,
+        account: &solana_account::Account,
+    ) -> Result<Self, titan_integration_template::trading_venue::error::TradingVenueError>
+    where
+        Self: Sized,
+    {
+        Self::from_account(key, account)
+    }
+}
+impl SuiteVenue for titan_integration_template::example::RaydiumAmmVenue {}
+impl SuiteVenue for titan_integration_template::reflect_junior::ReflectJuniorVenue {
+    fn from_test_account(
+        key: &Pubkey,
+        account: &solana_account::Account,
+    ) -> Result<Self, titan_integration_template::trading_venue::error::TradingVenueError> {
+        let mints: Vec<Pubkey> = std::env::var("RLP_ASSET_MINTS")
+            .expect("set RLP_ASSET_MINTS to comma-separated reserve mints")
+            .split(',')
+            .map(|s| s.trim().parse().expect("invalid RLP reserve mint"))
+            .collect();
+        Self::from_account(key, account)?.with_asset_mints(&mints)
+    }
+}
 
 /// Per-venue configuration the test entry points supply.
 pub struct SuiteConfig {
@@ -200,7 +223,8 @@ async fn build_venue<V: SuiteVenue>(rpc_url: String, pool: Pubkey) -> (V, RpcCli
         .get_account(&pool)
         .await
         .expect("failed to fetch pool account");
-    let mut venue = V::from_account(&pool, &account).expect("failed to build venue from account");
+    let mut venue =
+        V::from_test_account(&pool, &account).expect("failed to build venue from account");
     let cache = RpcClientCache::new(rpc);
     venue
         .update_state(&cache)

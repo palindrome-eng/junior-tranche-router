@@ -34,22 +34,47 @@ use solana_sysvar::clock::{self, Clock};
 use solana_transaction::Transaction;
 use spl_associated_token_account::get_associated_token_address_with_program_id;
 use spl_token::state::{Account as TokenAccount, AccountState};
-use titan_integration_template::account_caching::AccountsCache;
 use titan_integration_template::account_caching::rpc_cache::RpcClientCache;
+use titan_integration_template::account_caching::AccountsCache;
 use titan_integration_template::swap_route::{
-    ROUTE_WEIGHT_ALL, build_swap_leg, encode_swap_route_v3_data,
+    build_swap_leg, encode_swap_route_v3_data, ROUTE_WEIGHT_ALL,
 };
 use titan_integration_template::trading_venue::error::TradingVenueError;
 use titan_integration_template::trading_venue::token_info::TokenInfo;
-use titan_integration_template::trading_venue::{FromAccount, QuoteRequest, SwapType, TradingVenue};
+use titan_integration_template::trading_venue::{
+    FromAccount, QuoteRequest, SwapType, TradingVenue,
+};
 use titan_v3_venue_template::state::TitanPda;
 
 const SAMPLE_COUNT: usize = 10;
 
 /// A venue usable by the route suite: buildable from an account, quotable, and
 /// usable across `.await`.
-pub trait RouteVenue: TradingVenue + FromAccount + Send + Sync {}
-impl<T: TradingVenue + FromAccount + Send + Sync> RouteVenue for T {}
+pub trait RouteVenue: TradingVenue + FromAccount + Send + Sync {
+    fn from_test_account(
+        key: &Pubkey,
+        account: &solana_account::Account,
+    ) -> Result<Self, titan_integration_template::trading_venue::error::TradingVenueError>
+    where
+        Self: Sized,
+    {
+        Self::from_account(key, account)
+    }
+}
+impl RouteVenue for titan_integration_template::example::RaydiumAmmVenue {}
+impl RouteVenue for titan_integration_template::reflect_junior::ReflectJuniorVenue {
+    fn from_test_account(
+        key: &Pubkey,
+        account: &solana_account::Account,
+    ) -> Result<Self, titan_integration_template::trading_venue::error::TradingVenueError> {
+        let mints: Vec<Pubkey> = std::env::var("RLP_ASSET_MINTS")
+            .expect("set RLP_ASSET_MINTS to comma-separated reserve mints")
+            .split(',')
+            .map(|s| s.trim().parse().expect("invalid RLP reserve mint"))
+            .collect();
+        Self::from_account(key, account)?.with_asset_mints(&mints)
+    }
+}
 
 /// Per-venue configuration for the route suite.
 pub struct RouteConfig {
@@ -104,7 +129,12 @@ fn newest_rust_source_mtime(dir: &Path) -> Result<SystemTime, String> {
 fn ensure_route_program_is_fresh(route_so: &Path) -> Result<(), String> {
     let route_mtime = fs::metadata(route_so)
         .and_then(|metadata| metadata.modified())
-        .map_err(|e| format!("failed to stat built route program {}: {e}", route_so.display()))?;
+        .map_err(|e| {
+            format!(
+                "failed to stat built route program {}: {e}",
+                route_so.display()
+            )
+        })?;
     let src_dir = workspace_path("programs/titan-v3-venue-template/src");
     let source_mtime = newest_rust_source_mtime(&src_dir)?;
 
@@ -314,7 +344,10 @@ async fn load_route_accounts(
     );
 
     litesvm
-        .set_account(input_ata, create_token_account(input_token, payer, u64::MAX))
+        .set_account(
+            input_ata,
+            create_token_account(input_token, payer, u64::MAX),
+        )
         .unwrap();
     litesvm
         .set_account(output_ata, create_token_account(output_token, payer, 0))
@@ -412,7 +445,10 @@ pub async fn run_swap_route<V: RouteVenue>(config: RouteConfig) {
 
     // (a) RPC endpoint.
     let Ok(rpc_url) = env::var("SOLANA_RPC_URL") else {
-        eprintln!("SKIP {}: set SOLANA_RPC_URL to run this swap-route test", current_test());
+        eprintln!(
+            "SKIP {}: set SOLANA_RPC_URL to run this swap-route test",
+            current_test()
+        );
         return;
     };
 
@@ -444,10 +480,17 @@ pub async fn run_swap_route<V: RouteVenue>(config: RouteConfig) {
 
     // Build the venue from live state.
     let rpc = RpcClient::new(rpc_url);
-    let venue_account = rpc.get_account(&config.pool).await.expect("failed to fetch pool account");
+    let venue_account = rpc
+        .get_account(&config.pool)
+        .await
+        .expect("failed to fetch pool account");
     let cache = RpcClientCache::new(rpc);
-    let mut venue = V::from_account(&config.pool, &venue_account).expect("from_account failed");
-    venue.update_state(&cache).await.expect("update_state failed");
+    let mut venue =
+        V::from_test_account(&config.pool, &venue_account).expect("from_account failed");
+    venue
+        .update_state(&cache)
+        .await
+        .expect("update_state failed");
 
     // LiteSVM with the route program + the venue's programs loaded.
     let (mut litesvm, payer) = setup_litesvm();

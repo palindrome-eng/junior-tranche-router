@@ -1,0 +1,10 @@
+[package]
+name = "reflect-rlp-interface"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone RLP account layouts, deposit ABI, and oracle arithmetic for Titan"
+publish = false
+
+[dependencies]
+anchor-lang = "=0.31.1"
+pyth-solana-receiver-sdk = "=1.0.1"

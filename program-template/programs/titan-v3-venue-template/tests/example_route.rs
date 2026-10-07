@@ -3,9 +3,9 @@
 
 mod common;
 
-use common::{RouteConfig, run_swap_route};
+use common::{run_swap_route, RouteConfig};
 use solana_pubkey::pubkey;
-use titan_integration_template::example::{RAYDIUM_AMM_PROGRAM_ID, RaydiumAmmVenue};
+use titan_integration_template::example::{RaydiumAmmVenue, RAYDIUM_AMM_PROGRAM_ID};
 
 #[tokio::test]
 async fn swap_route_both_directions() {

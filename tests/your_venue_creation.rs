@@ -1,67 +1,95 @@
-//! Your venue's venue-creation parsing test.
-//!
-//! Fill this in with a self-contained fixture for your venue's pool-creation
-//! instruction. It should mirror `tests/venue_creation.rs`: no RPC, no network,
-//! just the decompiled instruction shape that your parser must recognize.
+use anchor_lang::{InstructionData, ToAccountMetas};
+use solana_pubkey::Pubkey;
+use titan_integration_template::{
+    reflect_junior::{
+        RLP_PROGRAM_ID, asset_address, interface as rlp, parse_pool_creations, settings_address,
+    },
+    trading_venue::venue_creation::ParsedInstruction,
+};
 
-use solana_pubkey::{Pubkey, pubkey};
-
-use titan_integration_template::trading_venue::protocol::PoolProtocol;
-use titan_integration_template::trading_venue::venue_creation::{ParsedInstruction, PoolCreation};
-use titan_integration_template::your_venue::{YOUR_PROGRAM_ID, parse_pool_creations};
-
-// FILL_IN: replace with a real pool address created by your fixture instruction.
-const POOL: Pubkey = pubkey!("11111111111111111111111111111111");
-// FILL_IN: replace with the first tradable mint from the new pool.
-const TOKEN_A_MINT: Pubkey = pubkey!("11111111111111111111111111111111");
-// FILL_IN: replace with the second tradable mint from the new pool.
-const TOKEN_B_MINT: Pubkey = pubkey!("11111111111111111111111111111111");
-
-fn require_fixture_constants_replaced() {
-    if POOL == Pubkey::default() {
-        todo!("replace POOL with a real pool address created by your fixture")
+fn reserve(mint: Pubkey) -> ParsedInstruction {
+    let pool = Pubkey::find_program_address(&[b"liquidity_pool", &[0]], &RLP_PROGRAM_ID).0;
+    let accounts = rlp::accounts::InitializePoolReserve {
+        signer: Pubkey::new_unique(),
+        permissions: Pubkey::new_unique(),
+        settings: settings_address(),
+        liquidity_pool: pool,
+        asset: asset_address(&mint),
+        asset_mint: mint,
+        pool_asset_account: spl_associated_token_account::get_associated_token_address(
+            &pool, &mint,
+        ),
+        system_program: solana_sdk_ids::system_program::ID,
+        token_program: spl_token::ID,
+        associated_token_program: spl_associated_token_account::ID,
     }
-    if TOKEN_A_MINT == Pubkey::default() || TOKEN_B_MINT == Pubkey::default() {
-        todo!("replace TOKEN_A_MINT and TOKEN_B_MINT with real tradable mints")
-    }
-}
-
-fn your_venue_pool_creation() -> ParsedInstruction {
-    // FILL_IN: build your venue's real pool-creation instruction fixture.
-    // Match the program id, discriminator, account order, and data layout your
-    // parser expects. Include the new pool and mint accounts at their real
-    // instruction positions.
-    todo!("build YourVenue pool-creation instruction fixture")
-}
-
-fn unrelated_instruction() -> ParsedInstruction {
+    .to_account_metas(None)
+    .into_iter()
+    .map(|a| a.pubkey)
+    .collect();
     ParsedInstruction {
-        program_id: YOUR_PROGRAM_ID,
-        accounts: vec![],
-        data: vec![],
+        program_id: RLP_PROGRAM_ID,
+        accounts,
+        data: rlp::instruction::InitializePoolReserve {
+            _liquidity_pool_id: 0,
+        }
+        .data(),
     }
 }
 
 #[test]
-fn parses_your_venue_pool_creation() {
-    require_fixture_constants_replaced();
-    let creations = parse_pool_creations(&[your_venue_pool_creation()]);
-
-    assert_eq!(
-        creations,
-        vec![PoolCreation {
-            protocol: PoolProtocol::YourPoolProtocol,
-            pool: POOL,
-            mints: vec![TOKEN_A_MINT, TOKEN_B_MINT],
-        }],
-    );
+fn parses_pool_reserves_and_merges_mints_without_duplicates() {
+    let a = Pubkey::new_unique();
+    let b = Pubkey::new_unique();
+    let found = parse_pool_creations(&[reserve(a), reserve(b), reserve(a)]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].mints, vec![a, b]);
 }
 
 #[test]
-fn ignores_transactions_without_a_creation() {
-    let creations = parse_pool_creations(&[unrelated_instruction()]);
-    assert!(
-        creations.is_empty(),
-        "a transaction without a pool creation creates no pools, got {creations:?}"
-    );
+fn initialize_lp_discovers_output_receipt_mint() {
+    let mut ix = reserve(Pubkey::new_unique());
+    ix.accounts.resize(11, Pubkey::new_unique());
+    let lp_mint = Pubkey::new_unique();
+    ix.accounts[4] = lp_mint;
+    ix.data = rlp::instruction::InitializeLp {
+        args: rlp::instructions::InitializeLiquidityPoolArgs {
+            cooldown_duration: 86400,
+            deposit_cap: None,
+            assets: vec![0, 1],
+            protected_vault: None,
+        },
+    }
+    .data();
+    let found = parse_pool_creations(&[ix.clone()]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].mints, vec![lp_mint]);
+    let a = Pubkey::new_unique();
+    let b = Pubkey::new_unique();
+    for instructions in [
+        vec![ix.clone(), reserve(a), reserve(b)],
+        vec![reserve(a), reserve(b), ix],
+    ] {
+        let found = parse_pool_creations(&instructions);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].mints, vec![a, b, lp_mint]);
+    }
+}
+
+#[test]
+fn rejects_unrelated_truncated_and_inconsistent_instructions() {
+    let original = reserve(Pubkey::new_unique());
+    for len in 0..original.data.len() {
+        let mut ix = original.clone();
+        ix.data.truncate(len);
+        assert!(parse_pool_creations(&[ix]).is_empty());
+    }
+    for index in [2, 3, 4, 6] {
+        let mut ix = original.clone();
+        ix.accounts[index] = Pubkey::new_unique();
+        assert!(parse_pool_creations(&[ix]).is_empty());
+    }
+    let mut ix = original;
+    ix.program_id = Pubkey::new_unique();
+    assert!(parse_pool_creations(&[ix]).is_empty());
 }
