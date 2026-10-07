@@ -1,39 +1,54 @@
-//! Guards that the route-builder `Venue` enum (in the off-chain crate's
-//! `swap_route` module) and the program `Venue` enum (this crate's `state.rs`)
-//! serialize to identical bytes.
-//!
-//! When you add your venue variant, add it to both enums in the same position
-//! and to the `cases` list below.
-
-use anchor_lang::AnchorSerialize;
-use titan_integration_template::swap_route::Venue as RouteBuilderVenue;
-use titan_v3_venue_template::state::Venue as ProgramVenue;
+use anchor_lang::{AnchorSerialize, InstructionData};
+use titan_integration_template::reflect_junior::interface as rlp;
+use titan_integration_template::swap_route::Venue as RouteVenue;
+use titan_v3_venue_template::{instructions::venues::reflect_junior, state::Venue};
 
 #[test]
 fn venue_enum_matches_route_builder() {
     let cases = [
-        (ProgramVenue::RaydiumAmm, RouteBuilderVenue::RaydiumAmm),
+        (Venue::RaydiumAmm, RouteVenue::RaydiumAmm),
         (
-            ProgramVenue::TemplateVenue {
-                zero_for_one: false,
-            },
-            RouteBuilderVenue::TemplateVenue {
-                zero_for_one: false,
-            },
+            Venue::ReflectJuniorDeposit { min_lp_tokens: 1 },
+            RouteVenue::ReflectJuniorDeposit { min_lp_tokens: 1 },
         ),
         (
-            ProgramVenue::TemplateVenue { zero_for_one: true },
-            RouteBuilderVenue::TemplateVenue { zero_for_one: true },
+            Venue::ReflectJuniorDeposit {
+                min_lp_tokens: u64::MAX,
+            },
+            RouteVenue::ReflectJuniorDeposit {
+                min_lp_tokens: u64::MAX,
+            },
         ),
     ];
-
-    for (program, route_builder) in cases {
-        let program_bytes = program.try_to_vec().unwrap();
-        let route_builder_bytes = route_builder.to_borsh_bytes();
-        assert_eq!(
-            program_bytes, route_builder_bytes,
-            "Venue {program:?} serializes differently between program and route builder — the two \
-             enums have drifted; check that variants match in name and order",
-        );
+    for (program, builder) in cases {
+        assert_eq!(program.try_to_vec().unwrap(), builder.to_borsh_bytes());
     }
+}
+
+#[test]
+fn mint_cpi_data_matches_bundled_anchor_instruction() {
+    use anchor_lang::prelude::*;
+    let mut accounts = (0..24)
+        .map(|_| AccountMeta::new_readonly(Pubkey::new_unique(), false))
+        .collect::<Vec<_>>();
+    accounts[15].pubkey = reflect_junior::PROGRAM_ID;
+    for amount in [1, 1_000_000, u64::MAX] {
+        let ix = reflect_junior::deposit(amount, 9, 123, &accounts)
+            .unwrap()
+            .remove(0);
+        let expected = rlp::instruction::Deposit {
+            args: rlp::instructions::DepositArgs {
+                liquidity_pool_index: 9,
+                amount,
+                min_lp_tokens: 123,
+            },
+        }
+        .data();
+        assert_eq!(ix.data, expected);
+        assert_eq!(ix.accounts, accounts);
+        assert_eq!(ix.program_id, rlp::ID);
+    }
+    assert!(reflect_junior::deposit(0, 9, 1, &accounts).is_err());
+    assert!(reflect_junior::deposit(1, 9, 0, &accounts).is_err());
+    assert!(reflect_junior::deposit(1, 9, 1, &accounts[..19]).is_err());
 }

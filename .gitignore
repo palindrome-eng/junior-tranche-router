@@ -10,6 +10,7 @@
 /program-template/program-dumps/
 # Program binaries fetched by `make dump-programs` for the off-chain sim tests
 /programs/*.so
+/programs/*-keypair.json
 
 # Cargo package / release artifacts
 /*.crate
@@ -50,6 +51,8 @@
 # Linux
 *.tmp
 *.lock
+!/Cargo.lock
+!/program-template/Cargo.lock
 
 # Windows
 Thumbs.db

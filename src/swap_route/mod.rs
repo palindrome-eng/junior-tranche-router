@@ -49,15 +49,7 @@ pub const ROUTE_WEIGHT_ALL: u32 = 1_000_000_000;
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Venue {
     RaydiumAmm,
-    // FILL_IN: add your venue variant here, in the SAME position as in
-    // `state.rs`. Include any CPI parameters the router must pass to your venue
-    // adapter, such as direction flags.
-    TemplateVenue { zero_for_one: bool },
-}
-
-#[allow(dead_code)]
-fn fill_in_route_venue_variant() -> ! {
-    todo!("add your route Venue variant in the same position as the program enum")
+    ReflectJuniorDeposit { min_lp_tokens: u64 },
 }
 
 impl Venue {
@@ -96,10 +88,24 @@ pub fn protocol_to_venue(
 ) -> Result<Venue, TradingVenueError> {
     match venue.protocol() {
         PoolProtocol::RaydiumAMM => Ok(Venue::RaydiumAmm),
-        // FILL_IN: map your PoolProtocol variant to your Venue variant.
-        PoolProtocol::YourPoolProtocol => {
-            let _ = (venue, request);
-            todo!("map YourPoolProtocol to your Venue variant")
+        PoolProtocol::ReflectJunior => {
+            if request.swap_type != crate::trading_venue::SwapType::ExactIn {
+                return Err(TradingVenueError::ExactOutNotSupported);
+            }
+            let tokens = venue.get_token_info();
+            if !venue.directions_num().iter().any(|&(from, to)| {
+                tokens
+                    .get(from as usize)
+                    .is_some_and(|t| t.pubkey == request.input_mint)
+                    && tokens
+                        .get(to as usize)
+                        .is_some_and(|t| t.pubkey == request.output_mint)
+            }) {
+                return Err(TradingVenueError::UnsupportedVenue(
+                    "RLP routes only reserve-to-LP deposits".into(),
+                ));
+            }
+            Ok(Venue::ReflectJuniorDeposit { min_lp_tokens: 1 })
         }
     }
 }
@@ -341,16 +347,11 @@ mod tests {
     #[test]
     fn venue_borsh_bytes_are_stable() {
         assert_eq!(Venue::RaydiumAmm.to_borsh_bytes(), vec![0]);
+        let mut expected = vec![1];
+        expected.extend_from_slice(&1u64.to_le_bytes());
         assert_eq!(
-            Venue::TemplateVenue {
-                zero_for_one: false,
-            }
-            .to_borsh_bytes(),
-            vec![1, 0]
-        );
-        assert_eq!(
-            Venue::TemplateVenue { zero_for_one: true }.to_borsh_bytes(),
-            vec![1, 1]
+            Venue::ReflectJuniorDeposit { min_lp_tokens: 1 }.to_borsh_bytes(),
+            expected
         );
     }
 }

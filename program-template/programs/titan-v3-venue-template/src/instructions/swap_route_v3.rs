@@ -7,7 +7,7 @@ use anchor_spl::token_2022::{close_account, CloseAccount, ID as TOKEN_PROGRAM_20
 use anchor_spl::token_interface::{transfer_checked, TransferChecked};
 
 use crate::error::TemplateError;
-use crate::instructions::venues::raydium_amm;
+use crate::instructions::venues::{raydium_amm, reflect_junior};
 use crate::state::{SwapSpecInputV2, TitanPda, Venue, MAX_MINTS, MAX_SWAPS};
 
 #[derive(Accounts)]
@@ -226,9 +226,27 @@ impl SwapRouteV3<'_> {
                 .saturating_mul(weight)
                 .saturating_div(1_000_000_000u128) as u64;
 
+            let leg_accounts = &ctx.remaining_accounts
+                [remaining_account_index..remaining_account_index + account_increment];
+            // Bind the declared route direction to the deposit's input/output ATAs.
+            // Even a manually encoded reverse route must never reach the RLP CPI.
+            if matches!(swap.venue, Venue::ReflectJuniorDeposit { .. }) {
+                require!(
+                    leg_accounts.len() >= 21,
+                    TemplateError::MissingRemainingAccount
+                );
+                require_keys_eq!(
+                    *leg_accounts[8].key,
+                    *input_token_account.key,
+                    TemplateError::InvalidSwapInput
+                );
+                require_keys_eq!(
+                    *leg_accounts[5].key,
+                    *ctx.remaining_accounts[swap.to as usize].key,
+                    TemplateError::InvalidSwapInput
+                );
+            }
             if input_amount > 0 {
-                let leg_accounts = &ctx.remaining_accounts
-                    [remaining_account_index..remaining_account_index + account_increment];
                 let account_metas = leg_accounts[..account_increment - 1]
                     .iter()
                     .map(|account| AccountMeta {
@@ -344,11 +362,12 @@ fn perform_cpi_swap<'info>(
 ) -> Result<()> {
     let instructions = match swap.venue {
         Venue::RaydiumAmm => raydium_amm::swap_base_in_v2(amount, account_metas)?,
-        // FILL_IN: add your venue dispatch arm here.
-        Venue::TemplateVenue { zero_for_one } => {
-            // Pass every CPI-specific field from the `Venue` variant into your adapter.
-            let _ = (zero_for_one, amount, account_metas);
-            todo!("replace TemplateVenue dispatch with your venue CPI module")
+        Venue::ReflectJuniorDeposit { min_lp_tokens } => {
+            let pool = account_infos
+                .get(3)
+                .ok_or(TemplateError::MissingRemainingAccount)?;
+            let index = reflect_junior::pool_index(pool)?;
+            reflect_junior::deposit(amount, index, min_lp_tokens, account_metas)?
         }
     };
 

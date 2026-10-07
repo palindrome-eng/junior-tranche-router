@@ -6,9 +6,7 @@ pub const MAX_MINTS: usize = 12;
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Copy, Eq, Debug)]
 pub enum Venue {
     RaydiumAmm,
-    // FILL_IN: add your venue variant here. Include any CPI parameters the
-    // router must pass to your venue adapter, such as direction flags.
-    TemplateVenue { zero_for_one: bool },
+    ReflectJuniorDeposit { min_lp_tokens: u64 },
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Copy, Eq, Debug)]

@@ -24,13 +24,13 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 swap-logging = []
 
 [dependencies]
-anchor-lang = "0.31.1"
+anchor-lang = "=0.31.1"
 anchor-spl = "0.31.1"
 
 [dev-dependencies]
 borsh = "0.10.4"
 env_logger = "0.11.3"
-litesvm = "^0.6.1"
+litesvm = "=0.7.1"
 log = "0.4.28"
 solana-account = "2.2.1"
 solana-client = "2.2.1"
@@ -47,3 +47,7 @@ spl-token = { version = "7", features = ["no-entrypoint"] }
 spl-token-2022 = { version = "^9", features = ["no-entrypoint"] }
 titan-integration-template = { path = "../../.." }
 tokio = { version = "1.38.0", features = ["full"] }
+async-trait = "0.1.80"
+bincode = "1.3.3"
+solana-program-option = "2.2.1"
+solana-sdk-ids = "2.2.1"
